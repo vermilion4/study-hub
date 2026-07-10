@@ -1,0 +1,75 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import ResourceCard from '../../components/ResourceCard.astro';
+import ProgressBar from '../../components/ProgressBar.astro';
+
+export async function getStaticPaths() {
+  const courses = await getCollection('courses');
+  return courses.map((c) => ({ params: { slug: c.slug }, props: { course: c } }));
+}
+
+const { course } = Astro.props;
+const all = await getCollection('resources');
+const resources = all
+  .filter((r) => r.data.course === course.slug)
+  .sort((a, b) => a.data.order - b.data.order);
+
+// group by topic, preserving first-seen order
+const topics: { topic: string; items: typeof resources }[] = [];
+for (const r of resources) {
+  let g = topics.find((t) => t.topic === r.data.topic);
+  if (!g) { g = { topic: r.data.topic, items: [] }; topics.push(g); }
+  g.items.push(r);
+}
+const resourceIds = resources.map((r) => r.id);
+---
+<Base title={course.data.title}>
+  <p><a href="/">← All courses</a></p>
+  <h1>{course.data.title}</h1>
+  <p style="color:var(--muted)">{course.data.description}</p>
+  <div style="margin:16px 0" id="progress-bar-wrap" data-resource-ids={JSON.stringify(resourceIds)}>
+    <ProgressBar percent={0} />
+  </div>
+  <p id="course-progress-label" style="color:var(--muted); font-size:13px"></p>
+
+  {topics.length === 0 && <p><em>No resources added yet. Drop a file in <code>src/content/resources/{course.slug}/</code>.</em></p>}
+
+  {topics.map((t) => (
+    <section style="margin-top:24px">
+      <h2 style="font-size:18px">{t.topic}</h2>
+      {t.items.map((r) => (
+        <ResourceCard id={r.id} title={r.data.title} type={r.data.type}
+          url={r.data.url} estMinutes={r.data.estMinutes} difficulty={r.data.difficulty} />
+      ))}
+    </section>
+  ))}
+
+  <script>
+    import * as p from '../../lib/progress';
+
+    const wrap = document.getElementById('progress-bar-wrap');
+    const resourceIds: string[] = wrap ? JSON.parse(wrap.dataset.resourceIds ?? '[]') : [];
+    const progress = document.querySelector('.progress');
+    const bar = progress?.querySelector('span') as HTMLElement | null;
+    const label = document.getElementById('course-progress-label');
+
+    const refresh = () => {
+      const pct = p.courseProgress(resourceIds);
+      if (bar) bar.style.width = pct + '%';
+      if (progress) progress.setAttribute('aria-label', pct + '% complete');
+      if (label) label.textContent = pct + '% complete';
+    };
+
+    document.querySelectorAll('.resource').forEach((el) => {
+      const id = el.getAttribute('data-resource-id');
+      const box = el.querySelector('.done-box') as HTMLInputElement | null;
+      if (id && box) {
+        box.checked = p.isDone(id);
+        box.addEventListener('change', () => { p.toggle(id); refresh(); });
+      }
+    });
+
+    refresh();
+  </script>
+</Base>

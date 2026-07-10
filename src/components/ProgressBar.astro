@@ -1,0 +1,7 @@
+---
+interface Props { percent: number; }
+const { percent } = Astro.props;
+---
+<div class="progress" aria-label={`${percent}% complete`}>
+  <span style={`width:${percent}%`}></span>
+</div>

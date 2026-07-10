@@ -1,0 +1,64 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const courses = await getCollection('courses');
+const titleBySlug = new Map<string, string>(courses.map((c) => [c.slug, c.data.title]));
+const resources = (await getCollection('resources')).sort((a, b) => {
+  const t = (titleBySlug.get(a.data.course as string) || '').localeCompare(titleBySlug.get(b.data.course as string) || '');
+  return t !== 0 ? t : a.data.order - b.data.order;
+});
+const types = ['video', 'article', 'exercise', 'reference', 'note'];
+const diffs = ['beginner', 'intermediate', 'advanced'];
+---
+<Base title="Browse">
+  <h1>Browse all resources</h1>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin:16px 0">
+    <input id="q" class="btn" placeholder="Search title…" style="flex:1; min-width:180px" />
+    <select id="f-type" class="btn"><option value="">All types</option>{types.map((t) => <option value={t}>{t}</option>)}</select>
+    <select id="f-diff" class="btn"><option value="">All levels</option>{diffs.map((d) => <option value={d}>{d}</option>)}</select>
+  </div>
+  <div id="list">
+    {resources.map((r) => (
+      <div class="card row" data-type={r.data.type} data-diff={r.data.difficulty}
+           style="display:flex; gap:12px; align-items:center; margin-bottom:8px">
+        <div style="flex:1">
+          {r.data.url
+            ? <a href={r.data.url} target="_blank" rel="noopener"><strong>{r.data.title}</strong></a>
+            : <strong>{r.data.title}</strong>}
+          <div style="color:var(--muted); font-size:13px">
+            {titleBySlug.get(r.data.course as string) ?? 'Unknown course'} · {r.data.type} · {r.data.estMinutes} min · <span class="chip">{r.data.difficulty}</span>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+  <p id="empty" style="display:none; color:var(--muted)">No resources match those filters.</p>
+
+  <script>
+    const q = document.getElementById('q') as HTMLInputElement | null;
+    const fType = document.getElementById('f-type') as HTMLSelectElement | null;
+    const fDiff = document.getElementById('f-diff') as HTMLSelectElement | null;
+    // Derive the searchable title from rendered text (not a data attribute) so
+    // titles containing HTML-special chars (&, ", <, >) still match user input.
+    const rows = [...document.querySelectorAll<HTMLElement>('.row')].map((el) => ({
+      el,
+      title: (el.querySelector('strong')?.textContent || '').toLowerCase(),
+    }));
+    const empty = document.getElementById('empty') as HTMLElement | null;
+    function apply() {
+      const term = q ? q.value.toLowerCase() : '';
+      let shown = 0;
+      rows.forEach((row) => {
+        const ok =
+          (!term || row.title.includes(term)) &&
+          (!fType?.value || row.el.dataset.type === fType.value) &&
+          (!fDiff?.value || row.el.dataset.diff === fDiff.value);
+        row.el.style.display = ok ? '' : 'none';
+        if (ok) shown++;
+      });
+      if (empty) empty.style.display = shown === 0 ? '' : 'none';
+    }
+    [q, fType, fDiff].forEach((el) => el?.addEventListener('input', apply));
+  </script>
+</Base>
