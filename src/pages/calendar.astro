@@ -1,0 +1,220 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+import { orderResources, type ResourceInput } from '../lib/schedule';
+
+const courses = await getCollection('courses');
+const courseBySlug = new Map<string, (typeof courses)[number]>(courses.map((c) => [c.slug, c]));
+const resources = await getCollection('resources');
+
+// Single source of truth for study order: reuse the tested orderResources()
+// (spec §4.1) rather than re-inlining the term → courseOrder → order comparator.
+const items = orderResources(
+  resources.map((r): ResourceInput => {
+    const c = courseBySlug.get(r.data.course);
+    return {
+      id: r.id,
+      title: r.data.title,
+      type: r.data.type,
+      url: r.data.url ?? null,
+      estMinutes: r.data.estMinutes,
+      difficulty: r.data.difficulty,
+      course: r.data.course,
+      courseTitle: c?.data.title ?? r.data.course,
+      topic: r.data.topic,
+      term: c?.data.term ?? 999,
+      courseOrder: c?.data.order ?? 999,
+      order: r.data.order,
+    };
+  }),
+);
+
+// Escape `<` so the JSON can never break out of the <script> element.
+const dataJson = JSON.stringify(items).replace(/</g, '\\u003c');
+---
+<Base title="Study Calendar">
+  <h1>Study Calendar</h1>
+  <p style="color:var(--muted)">An auto-generated day-by-day plan through the curriculum. Pick a start date and how many minutes you can study per day.</p>
+
+  <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin:16px 0">
+    <label style="font-size:13px; color:var(--muted)">Start date<br>
+      <input type="date" id="cal-start" class="btn" style="margin-top:4px" />
+    </label>
+    <label style="font-size:13px; color:var(--muted)">Minutes per day<br>
+      <select id="cal-budget" class="btn" style="margin-top:4px">
+        <option value="30">30</option>
+        <option value="60">60</option>
+        <option value="90" selected>90</option>
+        <option value="120">120</option>
+      </select>
+    </label>
+    <button class="btn" id="cal-today">Jump to today</button>
+  </div>
+
+  <p id="cal-summary" style="color:var(--muted); font-size:14px"></p>
+  <div id="cal-root"></div>
+  <p id="cal-empty" style="display:none; color:var(--muted)">No resources scheduled yet. Add some in the <a href="/">library</a>.</p>
+
+  <script type="application/json" id="calendar-data" set:html={dataJson}></script>
+  <script>
+    import * as p from '../lib/progress';
+    import {
+      packIntoDays, dateForDay, todayIndex, sessionKeys, isResourceComplete,
+      type ResourceInput, type Day,
+    } from '../lib/schedule';
+
+    const START_KEY = 'studyhub.calendar.start';
+    const BUDGET_KEY = 'studyhub.calendar.budget';
+    const ICON: Record<string, string> = { video: '▶', article: '📄', exercise: '⚡', reference: '📘', note: '📝' };
+    const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const dataEl = document.getElementById('calendar-data');
+    const items: ResourceInput[] = dataEl ? JSON.parse(dataEl.textContent || '[]') : [];
+
+    const startInput = document.getElementById('cal-start') as HTMLInputElement | null;
+    const budgetSelect = document.getElementById('cal-budget') as HTMLSelectElement | null;
+    const summaryEl = document.getElementById('cal-summary');
+    const root = document.getElementById('cal-root');
+    const emptyEl = document.getElementById('cal-empty');
+
+    function todayISO(): string {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function getStart(): string { return localStorage.getItem(START_KEY) || todayISO(); }
+    function getBudget(): number { return Number(localStorage.getItem(BUDGET_KEY)) || 90; }
+
+    function escapeHtml(s: string): string {
+      return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+    }
+    function monthLabel(iso: string): string {
+      const [y, m] = iso.split('-').map(Number);
+      return `${MONTHS[m - 1]} ${y}`;
+    }
+    function weekday(iso: string): string {
+      const [y, m, d] = iso.split('-').map(Number);
+      return WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+    }
+
+    // If a multi-session resource was marked done elsewhere (course page), seed its sessions.
+    function reconcile(days: Day[]): void {
+      const seen = new Set<string>();
+      for (const day of days) {
+        for (const it of day.items) {
+          if (it.partCount && it.partCount > 1 && !seen.has(it.resourceId)) {
+            seen.add(it.resourceId);
+            if (p.isDone(it.resourceId)) {
+              for (const k of sessionKeys(it.resourceId, it.partCount)) p.setDone(k, true);
+            }
+          }
+        }
+      }
+    }
+
+    function render(): void {
+      if (!root) return;
+      const start = getStart();
+      const budget = getBudget();
+      if (startInput) startInput.value = start;
+      if (budgetSelect) budgetSelect.value = String(budget);
+
+      const days = packIntoDays(items, budget);
+      reconcile(days);
+
+      if (emptyEl) emptyEl.style.display = days.length === 0 ? '' : 'none';
+
+      const tIdx = todayIndex(start, todayISO(), days.length);
+      let totalSessions = 0;
+      let doneSessions = 0;
+
+      root.innerHTML = '';
+      let currentMonth = '';
+      for (const day of days) {
+        const iso = dateForDay(start, day.dayIndex);
+        const ml = monthLabel(iso);
+        if (ml !== currentMonth) {
+          currentMonth = ml;
+          const h = document.createElement('h2');
+          h.textContent = ml;
+          h.style.cssText = 'font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:28px';
+          root.appendChild(h);
+        }
+
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.marginBottom = '12px';
+        if (day.dayIndex === tIdx) { card.style.borderColor = 'var(--accent)'; card.id = 'cal-today-card'; }
+        else if (tIdx >= 0 && day.dayIndex < tIdx) { card.style.opacity = '0.6'; }
+
+        const doneInDay = day.items.filter((it) => p.isDone(it.key)).length;
+        totalSessions += day.items.length;
+        doneSessions += doneInDay;
+
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--muted);margin-bottom:8px';
+        head.innerHTML =
+          `<strong style="color:var(--text)">${weekday(iso)} ${iso}${day.dayIndex === tIdx ? ' · Today' : ''}</strong>` +
+          `<span>Day ${day.dayIndex + 1} · ${day.totalMinutes} min · <span class="day-count">${doneInDay}/${day.items.length}</span> done</span>`;
+        card.appendChild(head);
+
+        if (day.isHeavy) {
+          const note = document.createElement('div');
+          note.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:8px';
+          note.textContent = 'A big one — may take a few sittings.';
+          card.appendChild(note);
+        }
+
+        for (const it of day.items) {
+          const row = document.createElement('label');
+          row.style.cssText = 'display:flex;gap:10px;align-items:center;padding:6px 0';
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          box.className = 'cal-box';
+          box.checked = p.isDone(it.key);
+          box.addEventListener('change', () => {
+            p.setDone(it.key, box.checked);
+            p.setDone(it.resourceId, isResourceComplete(it.resourceId, it.partCount, p.isDone));
+            render();
+          });
+          const label = document.createElement('div');
+          label.style.flex = '1';
+          const part = it.part ? ` · Part ${it.part} of ${it.partCount}` : '';
+          const titleHtml = it.url
+            ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(it.title)}</strong></a>`
+            : `<strong>${escapeHtml(it.title)}</strong>`;
+          label.innerHTML =
+            `${ICON[it.type] || '•'} ${titleHtml}${part}` +
+            `<div style="color:var(--muted);font-size:12px">${escapeHtml(it.courseTitle)} · ${it.minutesToday} min · <span class="chip">${escapeHtml(it.difficulty)}</span></div>`;
+          row.appendChild(box);
+          row.appendChild(label);
+          card.appendChild(row);
+        }
+        root.appendChild(card);
+      }
+
+      if (summaryEl) {
+        if (days.length === 0) {
+          summaryEl.textContent = '';
+        } else {
+          const pct = totalSessions ? Math.round((doneSessions / totalSessions) * 100) : 0;
+          const finish = dateForDay(start, days.length - 1);
+          const where = tIdx >= 0 ? `Day ${tIdx + 1} of ${days.length}` : `${days.length}-day plan`;
+          summaryEl.textContent = `${where} · ${pct}% complete · estimated finish ${finish}`;
+        }
+      }
+    }
+
+    startInput?.addEventListener('change', () => {
+      if (startInput.value) { localStorage.setItem(START_KEY, startInput.value); render(); }
+    });
+    budgetSelect?.addEventListener('change', () => {
+      localStorage.setItem(BUDGET_KEY, budgetSelect.value); render();
+    });
+    document.getElementById('cal-today')?.addEventListener('click', () => {
+      document.getElementById('cal-today-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    render();
+  </script>
+</Base>
