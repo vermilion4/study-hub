@@ -23,6 +23,11 @@ for (const r of resources) {
   g.items.push(r);
 }
 const resourceIds = resources.map((r) => r.id);
+const decks = await getCollection('flashcards');
+const deckTopics = new Set(
+  decks.filter((d) => d.data.course === course.slug).map((d) => d.data.topic),
+);
+const hasAnyDeck = deckTopics.size > 0;
 ---
 <Base title={course.data.title}>
   <p><a href="/">← All courses</a></p>
@@ -32,12 +37,22 @@ const resourceIds = resources.map((r) => r.id);
     <ProgressBar percent={0} />
   </div>
   <p id="course-progress-label" style="color:var(--muted); font-size:13px"></p>
+  {hasAnyDeck && (
+    <p style="margin:8px 0 0"><a class="btn" href={`/review?course=${encodeURIComponent(course.slug)}`}>Review this course</a></p>
+  )}
 
   {topics.length === 0 && <p><em>No resources added yet. Drop a file in <code>src/content/resources/{course.slug}/</code>.</em></p>}
 
   {topics.map((t) => (
-    <section style="margin-top:24px">
-      <h2 style="font-size:18px">{t.topic}</h2>
+    <section style="margin-top:36px">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px">
+        <h2 style="font-size:18px; margin:0">{t.topic}</h2>
+        {deckTopics.has(t.topic) && (
+          <a class="review-btn btn" style="font-size:13px"
+             data-topic-ids={JSON.stringify(t.items.map((r) => r.id))}
+             href={`/review?course=${encodeURIComponent(course.slug)}&topic=${encodeURIComponent(t.topic)}`}>Review</a>
+        )}
+      </div>
       {t.items.map((r) => (
         <ResourceCard id={r.id} title={r.data.title} type={r.data.type}
           url={r.data.url} estMinutes={r.data.estMinutes} difficulty={r.data.difficulty} />
@@ -59,6 +74,13 @@ const resourceIds = resources.map((r) => r.id);
       if (bar) bar.style.width = pct + '%';
       if (progress) progress.setAttribute('aria-label', pct + '% complete');
       if (label) label.textContent = pct + '% complete';
+      document.querySelectorAll('.review-btn').forEach((el) => {
+        const ids = JSON.parse(el.getAttribute('data-topic-ids') || '[]');
+        const done = ids.length > 0 && p.courseProgress(ids) === 100;
+        (el as HTMLElement).style.background = done ? 'var(--accent)' : '';
+        (el as HTMLElement).style.color = done ? '#fff' : '';
+        (el as HTMLElement).style.borderColor = done ? 'var(--accent)' : '';
+      });
     };
 
     document.querySelectorAll('.resource').forEach((el) => {

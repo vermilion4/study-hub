@@ -1,0 +1,170 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const courses = await getCollection('courses');
+const courseBySlug = new Map<string, (typeof courses)[number]>(courses.map((c) => [c.slug, c]));
+const decksRaw = await getCollection('flashcards');
+
+const decks = decksRaw
+  .map((d) => {
+    const c = courseBySlug.get(d.data.course);
+    return {
+      id: d.id,
+      course: d.data.course,
+      courseTitle: c?.data.title ?? d.data.course,
+      topic: d.data.topic,
+      term: c?.data.term ?? 999,
+      courseOrder: c?.data.order ?? 999,
+      order: d.data.order,
+      cards: d.data.cards.map((card, i) => ({ key: `${d.id}#${i}`, q: card.q, a: card.a })),
+    };
+  })
+  .sort((a, b) => a.term - b.term || a.courseOrder - b.courseOrder || a.order - b.order);
+
+const dataJson = JSON.stringify(decks).replace(/</g, '\\u003c');
+---
+<Base title="Review">
+  <h1>Review</h1>
+  <div id="review-root"></div>
+  <script type="application/json" id="review-data" set:html={dataJson}></script>
+  <script>
+    import { isKnown, setKnown, deckStats, initialQueue, grade } from '../lib/cards';
+
+    type Card = { key: string; q: string; a: string };
+    type Deck = { id: string; course: string; courseTitle: string; topic: string; term: number; courseOrder: number; order: number; cards: Card[] };
+    type Group = { course: string; courseTitle: string; decks: Deck[] };
+    type Selection = { title: string; cards: Card[] };
+
+    const dataEl = document.getElementById('review-data');
+    const decks: Deck[] = dataEl ? JSON.parse(dataEl.textContent || '[]') : [];
+    const root = document.getElementById('review-root') as HTMLElement;
+
+    function esc(s: string): string {
+      return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+    }
+    function params() { return new URLSearchParams(location.search); }
+
+    // Which cards are selected by the current URL, or null to show the index.
+    function selection(): Selection | null {
+      const pr = params();
+      if (pr.get('all')) return { title: 'All decks', cards: decks.flatMap((d) => d.cards) };
+      const course = pr.get('course');
+      if (course) {
+        const topic = pr.get('topic');
+        const matching = decks.filter((d) => d.course === course && (!topic || d.topic === topic));
+        if (matching.length === 0) return { title: 'Review', cards: [] };
+        const title = topic ? `${matching[0].courseTitle} · ${topic}` : matching[0].courseTitle;
+        return { title, cards: matching.flatMap((d) => d.cards) };
+      }
+      return null;
+    }
+
+    function renderIndex() {
+      const groups: Group[] = [];
+      for (const d of decks) {
+        let g = groups.find((x) => x.course === d.course);
+        if (!g) { g = { course: d.course, courseTitle: d.courseTitle, decks: [] }; groups.push(g); }
+        g.decks.push(d);
+      }
+      let html = '<p style="color:var(--muted)">Flip through cards and grade yourself. Progress is saved in this browser.</p>';
+      if (decks.length === 0) {
+        root.innerHTML = html + '<p style="color:var(--muted)">No decks yet.</p>';
+        return;
+      }
+      html += `<p><a class="btn" href="?all=1">Review everything</a></p>`;
+      for (const g of groups) {
+        html += `<section style="margin-top:32px"><h2 style="font-size:17px;margin:0 0 14px">${esc(g.courseTitle)} `
+          + `<a style="font-size:13px;font-weight:500" href="?course=${encodeURIComponent(g.course)}">· review whole course</a></h2>`;
+        for (const d of g.decks) {
+          const st = deckStats(d.cards.map((c) => c.key));
+          const badge = st.mastered ? ' <span class="chip">Mastered ✓</span>' : '';
+          const href = `?course=${encodeURIComponent(d.course)}&topic=${encodeURIComponent(d.topic)}`;
+          html += `<div class="card" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">`
+            + `<div><a href="${href}"><strong>${esc(d.topic)}</strong></a>${badge}`
+            + `<div style="color:var(--muted);font-size:12px">${st.known}/${st.total} known</div></div>`
+            + `<a class="btn" href="${href}">Review</a></div>`;
+        }
+        html += '</section>';
+      }
+      root.innerHTML = html;
+    }
+
+    let sel: Selection | null = null;
+    let queue: string[] = [];
+    let allKeys: string[] = [];
+    let cardByKey = new Map<string, Card>();
+    let showingAnswer = false;
+    let unknownOnly = false;
+
+    function startSession() {
+      allKeys = sel!.cards.map((c) => c.key);
+      cardByKey = new Map(sel!.cards.map((c) => [c.key, c]));
+      queue = initialQueue(allKeys, { unknownOnly, isKnown });
+      for (let i = queue.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [queue[i], queue[j]] = [queue[j], queue[i]];
+      }
+      showingAnswer = false;
+      renderPlayer();
+    }
+
+    function renderPlayer() {
+      const st = deckStats(allKeys);
+      if (queue.length === 0) {
+        root.innerHTML = `<p><a href="/review">← All decks</a></p>`
+          + `<div class="card" style="text-align:center;padding:32px">`
+          + `<h2>Deck cleared 🎉</h2>`
+          + `<p style="color:var(--muted)">${st.known}/${st.total} known in "${esc(sel!.title)}"</p>`
+          + `<div style="display:flex;gap:10px;justify-content:center;margin-top:8px">`
+          + `<button class="btn" id="again">Study again</button>`
+          + `<button class="btn" id="unknown-again">Only cards I don't know</button></div></div>`;
+        document.getElementById('again')?.addEventListener('click', () => { unknownOnly = false; startSession(); });
+        document.getElementById('unknown-again')?.addEventListener('click', () => { unknownOnly = true; startSession(); });
+        return;
+      }
+      const card = cardByKey.get(queue[0]);
+      root.innerHTML = `<p><a href="/review">← All decks</a></p>`
+        + `<div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-bottom:8px">`
+        + `<span>${esc(sel!.title)}</span><span>${queue.length} left · ${st.known}/${st.total} known</span></div>`
+        + `<div class="card" id="flip" style="min-height:150px;display:flex;flex-direction:column;justify-content:center;cursor:pointer;padding:28px">`
+        + `<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${showingAnswer ? 'Answer' : 'Question'}</div>`
+        + `<div style="font-size:18px;margin-top:8px">${showingAnswer ? esc(card!.a) : esc(card!.q)}</div>`
+        + `${showingAnswer ? '' : '<div style="color:var(--muted);font-size:12px;margin-top:12px">Click or press Space to flip</div>'}</div>`
+        + `<div style="display:flex;gap:10px;margin-top:12px">`
+        + `${showingAnswer
+            ? `<button class="btn" id="review-btn">↩ Need review</button><button class="btn" id="known-btn">✓ Got it</button>`
+            : `<button class="btn" id="flip-btn">Flip</button>`}</div>`
+        + `<label style="display:block;margin-top:14px;font-size:13px;color:var(--muted)">`
+        + `<input type="checkbox" id="unknown-toggle" ${unknownOnly ? 'checked' : ''}/> Only cards I don't know yet</label>`;
+      document.getElementById('flip')?.addEventListener('click', flip);
+      document.getElementById('flip-btn')?.addEventListener('click', flip);
+      document.getElementById('known-btn')?.addEventListener('click', () => doGrade('known'));
+      document.getElementById('review-btn')?.addEventListener('click', () => doGrade('review'));
+      document.getElementById('unknown-toggle')?.addEventListener('change', (e) => {
+        unknownOnly = (e.target as HTMLInputElement).checked; startSession();
+      });
+    }
+
+    function flip() { if (!showingAnswer) { showingAnswer = true; renderPlayer(); } }
+    function doGrade(outcome: 'known' | 'review') {
+      setKnown(queue[0], outcome === 'known');
+      queue = grade(queue, outcome).queue;
+      showingAnswer = false;
+      renderPlayer();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (!sel || queue.length === 0) return;
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!showingAnswer) flip(); }
+      else if (showingAnswer && (e.key === 'ArrowRight' || e.key === '2')) doGrade('known');
+      else if (showingAnswer && (e.key === 'ArrowLeft' || e.key === '1')) doGrade('review');
+    });
+
+    sel = selection();
+    if (!sel) renderIndex();
+    else if (sel.cards.length === 0) {
+      root.innerHTML = `<p><a href="/review">← All decks</a></p><p style="color:var(--muted)">No cards here yet.</p>`;
+    } else { startSession(); }
+  </script>
+</Base>

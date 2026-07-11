@@ -1,6 +1,5 @@
 ---
 import Base from '../layouts/Base.astro';
-import ProgressBar from '../components/ProgressBar.astro';
 import { getCourseTree } from '../lib/nav';
 import { getCollection } from 'astro:content';
 
@@ -10,25 +9,74 @@ const idsByCourse: Record<string, string[]> = {};
 for (const r of resources) {
   (idsByCourse[r.data.course] ??= []).push(r.id);
 }
+const allIds = resources.map((r) => r.id);
+const levels = tree.map((g) => ({
+  term: g.term,
+  ids: g.courses.flatMap((c) => idsByCourse[c.slug] ?? []),
+}));
+
+// Pull the real course code out of "Title (CST8116)" for a mono badge.
+function splitCode(title: string): { name: string; code: string | null } {
+  const m = title.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  return m ? { name: m[1], code: m[2] } : { name: title, code: null };
+}
 ---
 <Base title="Dashboard">
-  <h1>Computer Programming — Study Hub</h1>
-  <p style="color:var(--muted)">Algonquin College · ordered basic → advanced. Check things off as you go.</p>
+  <section class="hero">
+    <p class="eyebrow">Algonquin College · Computer Programming Diploma</p>
+    <h1 class="hero-title">From <code class="hero-code">Hello, World</code> to your capstone.</h1>
+    <p class="hero-sub">Every course, resource, and flashcard for the two-year program — ordered basic to advanced, and tracked as you go.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/calendar">Today's study plan →</a>
+      <a class="btn" href="/review">Flashcards</a>
+    </div>
+  </section>
+
+  <div class="meter card" data-all-ids={JSON.stringify(allIds)}>
+    <div class="meter-top">
+      <div class="meter-figure">
+        <span class="meter-pct" id="overall-pct">0</span><span class="meter-pct-unit">%</span>
+      </div>
+      <div class="meter-meta">
+        <p class="eyebrow">Overall mastery</p>
+        <p class="meter-count"><span id="overall-done">0</span> of {allIds.length} resources complete</p>
+      </div>
+    </div>
+    <div class="meter-levels">
+      {levels.map((lv) => (
+        <div class="meter-lv" data-level-ids={JSON.stringify(lv.ids)}>
+          <div class="meter-lv-track"><span></span></div>
+          <div class="meter-lv-foot"><span>Level {lv.term}</span><span class="meter-lv-pct">0%</span></div>
+        </div>
+      ))}
+    </div>
+  </div>
 
   {tree.map((group) => (
-    <section style="margin-top:28px">
-      <h2 style="font-size:16px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em">Level {group.term}</h2>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; margin-top:12px">
-        {group.courses.map((c) => (
-          <a class="card" href={`/course/${c.slug}`}
-             data-course-ids={JSON.stringify(idsByCourse[c.slug] ?? [])}
-             style="display:block">
-            <strong>{c.data.title}</strong>
-            <div style="color:var(--muted); font-size:13px; margin:6px 0 10px">{c.data.description}</div>
-            <ProgressBar percent={0} />
-            <div class="course-pct" style="font-size:12px; color:var(--muted); margin-top:6px">0%</div>
-          </a>
-        ))}
+    <section class="level-block">
+      <div class="level-head">
+        <span class="eyebrow">Level 0{group.term}</span>
+        <span class="level-line"></span>
+        <span class="level-count">{group.courses.length} courses</span>
+      </div>
+      <div class="course-grid">
+        {group.courses.map((c) => {
+          const { name, code } = splitCode(c.data.title);
+          return (
+            <a class="card course-card" href={`/course/${c.slug}`}
+               data-course-ids={JSON.stringify(idsByCourse[c.slug] ?? [])}>
+              <div class="cc-head">
+                <h3 class="cc-name">{name}</h3>
+                {code && <span class="cc-code">{code}</span>}
+              </div>
+              <p class="cc-desc">{c.data.description}</p>
+              <div class="cc-foot">
+                <div class="progress" style="flex:1"><span></span></div>
+                <span class="course-pct">0%</span>
+              </div>
+            </a>
+          );
+        })}
       </div>
     </section>
   ))}
@@ -36,15 +84,111 @@ for (const r of resources) {
   <script>
     import * as p from '../lib/progress';
 
-    document.querySelectorAll('[data-course-ids]').forEach((el) => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function countTo(el: HTMLElement, target: number) {
+      if (reduceMotion || target === 0) { el.textContent = String(target); return; }
+      const start = performance.now();
+      const dur = 650;
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - t, 3);
+        el.textContent = String(Math.round(eased * target));
+        if (t < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+
+    // Per-course cards
+    document.querySelectorAll('.course-card').forEach((el) => {
       const ids = JSON.parse(el.getAttribute('data-course-ids') || '[]');
       const pct = p.courseProgress(ids);
-      const progress = el.querySelector('.progress');
-      const bar = progress?.querySelector('span') as HTMLElement | null;
+      const bar = el.querySelector('.progress > span') as HTMLElement | null;
       const lbl = el.querySelector('.course-pct') as HTMLElement | null;
       if (bar) bar.style.width = pct + '%';
-      if (progress) progress.setAttribute('aria-label', pct + '% complete');
       if (lbl) lbl.textContent = pct + '%';
     });
+
+    // Mastery meter — per level + overall
+    document.querySelectorAll('.meter-lv').forEach((el) => {
+      const ids = JSON.parse(el.getAttribute('data-level-ids') || '[]');
+      const pct = p.courseProgress(ids);
+      const bar = el.querySelector('.meter-lv-track > span') as HTMLElement | null;
+      const lbl = el.querySelector('.meter-lv-pct') as HTMLElement | null;
+      if (bar) requestAnimationFrame(() => { bar.style.width = pct + '%'; });
+      if (lbl) lbl.textContent = pct + '%';
+    });
+
+    const meter = document.querySelector('.meter') as HTMLElement | null;
+    if (meter) {
+      const allIds: string[] = JSON.parse(meter.getAttribute('data-all-ids') || '[]');
+      const overall = p.courseProgress(allIds);
+      const done = allIds.filter((id) => p.isDone(id)).length;
+      const pctEl = document.getElementById('overall-pct');
+      const doneEl = document.getElementById('overall-done');
+      if (pctEl) countTo(pctEl, overall);
+      if (doneEl) countTo(doneEl, done);
+    }
   </script>
+
+  <style>
+    .hero { padding: 30px 0 4px; }
+    .hero-title { margin-top: 14px; max-width: 20ch; }
+    .hero-code {
+      font-size: 0.62em;
+      background: var(--accent-weak);
+      color: var(--accent);
+      padding: 0.06em 0.32em;
+      border-radius: 9px;
+      letter-spacing: -0.02em;
+      vertical-align: 0.06em;
+      white-space: nowrap;
+    }
+    .hero-sub { color: var(--muted); font-size: 17px; line-height: 1.5; max-width: 54ch; margin: 16px 0 0; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+
+    .meter { margin-top: 26px; padding: 22px 24px; }
+    .meter-top { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+    .meter-figure { display: flex; align-items: baseline; }
+    .meter-pct {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: clamp(2.6rem, 1rem + 6vw, 3.8rem);
+      letter-spacing: -0.045em;
+      line-height: 0.85;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .meter-pct-unit { font-family: var(--font-display); font-weight: 700; font-size: 1.4rem; color: var(--muted); margin-left: 3px; }
+    .meter-meta { flex: 1; min-width: 180px; }
+    .meter-count { font-size: 13px; color: var(--muted); margin: 3px 0 0; }
+    .meter-levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 22px; }
+    .meter-lv-track { height: 10px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    .meter-lv-track > span {
+      display: block; height: 100%; width: 0; border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 0.7s cubic-bezier(.2, .7, .2, 1);
+    }
+    .meter-lv-foot { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); }
+    .meter-lv-pct { color: var(--text); font-weight: 600; }
+
+    .level-block { margin-top: 42px; }
+    .level-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+    .level-line { flex: 1; height: 1px; background: var(--border); }
+    .level-count { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+    .course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 14px; }
+    .course-card { display: flex; flex-direction: column; gap: 10px; }
+    .cc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .cc-name { font-size: 17px; line-height: 1.2; }
+    .cc-code { flex-shrink: 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); padding: 3px 6px; border-radius: 6px; }
+    .cc-desc { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 0; flex: 1; }
+    .cc-foot { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+    .course-pct { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--muted); min-width: 36px; text-align: right; }
+
+    @media (max-width: 560px) {
+      .meter-levels { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
 </Base>

@@ -50,3 +50,23 @@ describe('resourceSchema', () => {
     })).toThrow();
   });
 });
+
+import { deckSchema } from './schema';
+
+describe('deckSchema', () => {
+  it('accepts a valid deck', () => {
+    const d = deckSchema.parse({
+      course: 'intro-to-computer-programming', topic: 'Control Flow', order: 1,
+      cards: [{ q: 'Q?', a: 'A.' }],
+    });
+    expect(d.cards.length).toBe(1);
+  });
+  it('rejects a card missing q or a', () => {
+    expect(() => deckSchema.parse({
+      course: 'c', topic: 'T', order: 1, cards: [{ q: 'only q' }],
+    })).toThrow();
+  });
+  it('rejects an empty cards array', () => {
+    expect(() => deckSchema.parse({ course: 'c', topic: 'T', order: 1, cards: [] })).toThrow();
+  });
+});

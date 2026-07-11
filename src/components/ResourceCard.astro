@@ -3,14 +3,14 @@ interface Props {
   id: string; title: string; type: string;
   url?: string; estMinutes: number; difficulty: string;
 }
+import { typeIcon } from '../lib/icons';
 const { id, title, type, url, estMinutes, difficulty } = Astro.props;
-const icon = { video: '▶', article: '📄', exercise: '⚡', reference: '📘', note: '📝' }[type] ?? '•';
 const href = type === 'note' ? undefined : url;
 ---
 <div class="card resource" data-resource-id={id}
      style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
   <input type="checkbox" class="done-box" aria-label={`Mark ${title} done`} />
-  <span style="font-size:20px">{icon}</span>
+  <span class="rc-icon" set:html={typeIcon(type, 19)}></span>
   <div style="flex:1">
     {href
       ? <a href={href} target="_blank" rel="noopener"><strong>{title}</strong></a>

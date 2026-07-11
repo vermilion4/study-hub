@@ -24,3 +24,17 @@ export const resourceSchema = z.object({
 
 export type Course = z.infer<typeof courseSchema>;
 export type Resource = z.infer<typeof resourceSchema>;
+
+export const cardSchema = z.object({
+  q: z.string(),
+  a: z.string(),
+});
+
+export const deckSchema = z.object({
+  course: z.string(),
+  topic: z.string(),
+  order: z.number().int().min(1),
+  cards: z.array(cardSchema).min(1),
+});
+
+export type Deck = z.infer<typeof deckSchema>;

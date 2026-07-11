@@ -36,24 +36,63 @@ const dataJson = JSON.stringify(items).replace(/</g, '\\u003c');
   <h1>Study Calendar</h1>
   <p style="color:var(--muted)">An auto-generated day-by-day plan through the curriculum. Pick a start date and how many minutes you can study per day.</p>
 
-  <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin:16px 0">
-    <label style="font-size:13px; color:var(--muted)">Start date<br>
-      <input type="date" id="cal-start" class="btn" style="margin-top:4px" />
+  <div class="cal-settings">
+    <label class="cal-field">
+      <span>Start date</span>
+      <input type="date" id="cal-start" class="btn" />
     </label>
-    <label style="font-size:13px; color:var(--muted)">Minutes per day<br>
-      <select id="cal-budget" class="btn" style="margin-top:4px">
+    <label class="cal-field">
+      <span>Minutes per day</span>
+      <select id="cal-budget" class="btn">
         <option value="30">30</option>
         <option value="60">60</option>
         <option value="90" selected>90</option>
         <option value="120">120</option>
       </select>
     </label>
-    <button class="btn" id="cal-today">Jump to today</button>
+    <button class="btn cal-jump" id="cal-today">Jump to today</button>
   </div>
 
   <p id="cal-summary" style="color:var(--muted); font-size:14px"></p>
   <div id="cal-root"></div>
   <p id="cal-empty" style="display:none; color:var(--muted)">No resources scheduled yet. Add some in the <a href="/">library</a>.</p>
+
+  <!-- is:global because the day cards are built by the client script (createElement),
+       and Astro scoped styles only match template elements. -->
+  <style is:global>
+    .cal-settings { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0 26px; }
+    .cal-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 148px; }
+    .cal-field .btn { width: 100%; font-weight: 500; }
+    .cal-jump { align-self: end; }
+
+    #cal-root .card { padding: 8px 18px; }
+    .cal-day-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; align-items: baseline; padding: 12px 0 10px; margin-bottom: 2px; border-bottom: 1px solid var(--border); }
+    .cal-day-date { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--text); letter-spacing: -0.01em; }
+    .cal-day-meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+    .cal-heavy { font-size: 12px; color: var(--spark); margin: 10px 0 0; }
+
+    .cal-row { display: flex; align-items: center; gap: 13px; padding: 12px 0; }
+    .cal-row + .cal-row { border-top: 1px solid var(--border); }
+    .cal-ico { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-weak); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
+    .cal-body { flex: 1; min-width: 0; }
+    .cal-title { line-height: 1.35; font-weight: 600; }
+    .cal-title a { color: var(--text); }
+    .cal-title a:hover { color: var(--accent); }
+    .cal-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .cal-row.is-done .cal-title a, .cal-row.is-done .cal-title strong { color: var(--muted); }
+    .cal-check {
+      -webkit-appearance: none; appearance: none;
+      width: 24px; height: 24px; flex-shrink: 0;
+      border: 2px solid var(--border); border-radius: 50%;
+      cursor: pointer; transition: background .15s, border-color .15s;
+    }
+    .cal-check:hover { border-color: var(--accent); }
+    .cal-check:focus-visible { outline: none; box-shadow: var(--ring); }
+    .cal-check:checked {
+      border-color: var(--accent);
+      background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 14px no-repeat;
+    }
+  </style>
 
   <script type="application/json" id="calendar-data" set:html={dataJson}></script>
   <script>
@@ -62,10 +101,10 @@ const dataJson = JSON.stringify(items).replace(/</g, '\\u003c');
       packIntoDays, dateForDay, todayIndex, sessionKeys, isResourceComplete,
       type ResourceInput, type Day,
     } from '../lib/schedule';
+    import { typeIcon } from '../lib/icons';
 
     const START_KEY = 'studyhub.calendar.start';
     const BUDGET_KEY = 'studyhub.calendar.budget';
-    const ICON: Record<string, string> = { video: '▶', article: '📄', exercise: '⚡', reference: '📘', note: '📝' };
     const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -137,7 +176,7 @@ const dataJson = JSON.stringify(items).replace(/</g, '\\u003c');
           currentMonth = ml;
           const h = document.createElement('h2');
           h.textContent = ml;
-          h.style.cssText = 'font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:28px';
+          h.style.cssText = 'font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.14em;margin:30px 0 14px';
           root.appendChild(h);
         }
 
@@ -152,42 +191,52 @@ const dataJson = JSON.stringify(items).replace(/</g, '\\u003c');
         doneSessions += doneInDay;
 
         const head = document.createElement('div');
-        head.style.cssText = 'display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--muted);margin-bottom:8px';
+        head.className = 'cal-day-head';
         head.innerHTML =
-          `<strong style="color:var(--text)">${weekday(iso)} ${iso}${day.dayIndex === tIdx ? ' · Today' : ''}</strong>` +
-          `<span>Day ${day.dayIndex + 1} · ${day.totalMinutes} min · <span class="day-count">${doneInDay}/${day.items.length}</span> done</span>`;
+          `<span class="cal-day-date">${weekday(iso)} ${iso}${day.dayIndex === tIdx ? ' · Today' : ''}</span>` +
+          `<span class="cal-day-meta">Day ${day.dayIndex + 1} · ${day.totalMinutes} min · <span class="day-count">${doneInDay}/${day.items.length}</span> done</span>`;
         card.appendChild(head);
 
         if (day.isHeavy) {
           const note = document.createElement('div');
-          note.style.cssText = 'font-size:12px;color:var(--muted);margin-bottom:8px';
+          note.className = 'cal-heavy';
           note.textContent = 'A big one — may take a few sittings.';
           card.appendChild(note);
         }
 
         for (const it of day.items) {
-          const row = document.createElement('label');
-          row.style.cssText = 'display:flex;gap:10px;align-items:center;padding:6px 0';
+          const done = p.isDone(it.key);
+          const row = document.createElement('div');
+          row.className = 'cal-row' + (done ? ' is-done' : '');
+
+          const tile = document.createElement('span');
+          tile.className = 'cal-ico';
+          tile.innerHTML = typeIcon(it.type, 18);
+
+          const body = document.createElement('div');
+          body.className = 'cal-body';
+          const part = it.part ? ` · Part ${it.part} of ${it.partCount}` : '';
+          const titleHtml = it.url
+            ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.title)}${part}</a>`
+            : `<strong>${escapeHtml(it.title)}${part}</strong>`;
+          body.innerHTML =
+            `<div class="cal-title">${titleHtml}</div>` +
+            `<div class="cal-meta">${escapeHtml(it.courseTitle)} · ${it.minutesToday} min · <span class="chip">${escapeHtml(it.difficulty)}</span></div>`;
+
           const box = document.createElement('input');
           box.type = 'checkbox';
-          box.className = 'cal-box';
-          box.checked = p.isDone(it.key);
+          box.className = 'cal-check';
+          box.checked = done;
+          box.setAttribute('aria-label', `Mark "${it.title}" done`);
           box.addEventListener('change', () => {
             p.setDone(it.key, box.checked);
             p.setDone(it.resourceId, isResourceComplete(it.resourceId, it.partCount, p.isDone));
             render();
           });
-          const label = document.createElement('div');
-          label.style.flex = '1';
-          const part = it.part ? ` · Part ${it.part} of ${it.partCount}` : '';
-          const titleHtml = it.url
-            ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(it.title)}</strong></a>`
-            : `<strong>${escapeHtml(it.title)}</strong>`;
-          label.innerHTML =
-            `${ICON[it.type] || '•'} ${titleHtml}${part}` +
-            `<div style="color:var(--muted);font-size:12px">${escapeHtml(it.courseTitle)} · ${it.minutesToday} min · <span class="chip">${escapeHtml(it.difficulty)}</span></div>`;
+
+          row.appendChild(tile);
+          row.appendChild(body);
           row.appendChild(box);
-          row.appendChild(label);
           card.appendChild(row);
         }
         root.appendChild(card);

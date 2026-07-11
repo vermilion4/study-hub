@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import { icon } from '../lib/icons';
 interface Props { title: string; }
 const { title } = Astro.props;
 ---
@@ -9,27 +10,60 @@ const { title } = Astro.props;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · Study Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
     <script is:inline>
       const t = localStorage.getItem('studyhub.theme');
       if (t) document.documentElement.setAttribute('data-theme', t);
     </script>
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="/">📚 Study Hub</a>
-      <a href="/browse">Browse</a>
-      <a href="/calendar">Calendar</a>
-      <span class="spacer"></span>
-      <button class="btn" id="export-progress">⬇ Backup</button>
-      <button class="btn" id="import-progress">⬆ Restore</button>
-      <input type="file" id="import-file" accept="application/json" hidden />
-      <button class="btn" id="theme-toggle" aria-label="Toggle theme">🌓</button>
+    <header class="topbar" id="topbar">
+      <a class="brand" href="/">
+        <span class="brand-mark" set:html={icon('graduation-cap', 19)}></span>
+        <span class="brand-name">Study Hub</span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-menu">
+        <span class="ico" id="nav-toggle-ico" set:html={icon('menu', 20)}></span>
+      </button>
+      <div class="nav-menu" id="nav-menu">
+        <nav class="nav-links">
+          <a href="/browse">Browse</a>
+          <a href="/calendar">Calendar</a>
+          <a href="/review">Review</a>
+        </nav>
+        <span class="spacer"></span>
+        <div class="nav-actions">
+          <button class="btn nav-io" id="export-progress" aria-label="Back up progress" title="Save your progress to a file">
+            <span class="ico" set:html={icon('download', 16)}></span><span class="nav-io-label">Back up</span>
+          </button>
+          <button class="btn nav-io" id="import-progress" aria-label="Restore progress" title="Load progress from a file">
+            <span class="ico" set:html={icon('upload', 16)}></span><span class="nav-io-label">Restore</span>
+          </button>
+          <input type="file" id="import-file" accept="application/json" hidden />
+          <button class="btn nav-io" id="theme-toggle" aria-label="Toggle theme" title="Toggle light / dark">
+            <span class="ico" id="theme-icon" set:html={icon('moon', 16)}></span><span class="nav-io-label">Theme</span>
+          </button>
+        </div>
+      </div>
     </header>
     <main class="container" style="padding-top:24px; padding-bottom:64px;">
       <slot />
     </main>
     <script>
       import * as p from '../lib/progress';
+      import { icon } from '../lib/icons';
+
+      const themeIconEl = document.getElementById('theme-icon');
+      function setThemeIcon() {
+        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+        if (themeIconEl) themeIconEl.innerHTML = icon(dark ? 'sun' : 'moon', 16);
+      }
+      setThemeIcon();
 
       const btn = document.getElementById('theme-toggle');
       btn?.addEventListener('click', () => {
@@ -37,6 +71,25 @@ const { title } = Astro.props;
         const next = el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         el.setAttribute('data-theme', next);
         localStorage.setItem('studyhub.theme', next);
+        setThemeIcon();
+      });
+
+      // Mobile hamburger menu
+      const topbar = document.getElementById('topbar');
+      const navToggle = document.getElementById('nav-toggle');
+      const navToggleIco = document.getElementById('nav-toggle-ico');
+      function setMenu(open: boolean) {
+        topbar?.classList.toggle('nav-open', open);
+        navToggle?.setAttribute('aria-expanded', String(open));
+        navToggle?.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+        if (navToggleIco) navToggleIco.innerHTML = icon(open ? 'x' : 'menu', 20);
+      }
+      navToggle?.addEventListener('click', () => {
+        setMenu(!topbar?.classList.contains('nav-open'));
+      });
+      // Close the menu after choosing a destination.
+      document.querySelectorAll('#nav-menu .nav-links a').forEach((a) => {
+        a.addEventListener('click', () => setMenu(false));
       });
 
       document.getElementById('export-progress')?.addEventListener('click', () => {
