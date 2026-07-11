@@ -99,12 +99,3 @@ the build with a clear message. To add a whole new course, create
 
 The curriculum (all 19 courses across Levels 1–4) is populated. **Level 1 is fully seeded
 with study resources**; later levels have course entries ready to fill in the same way.
-
-## Roadmap
-
-- **Phase 1 — Resource Library** ✅ (this)
-- **Phase 2 — 30-day Study Calendar** — a dated view that distributes resources across days,
-  reusing the existing content model.
-- **Phase 3 — Quizzes & cue cards** — flashcard decks attached to topics.
-
-Design and implementation notes live in `docs/superpowers/`.
