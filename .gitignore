@@ -22,3 +22,10 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+# agent tooling & local docs (not part of the shipped site)
+.claude/
+.superpowers/
+docs/
+CLAUDE.md
+AGENTS.md
